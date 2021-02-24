@@ -8,6 +8,7 @@ import sys
 import json
 import gzip
 from io import BytesIO
+import time
 
 try:
     # python2
@@ -87,6 +88,26 @@ class S3DataStore(MetaflowDataStore):
                 return None
             else:
                 raise
+
+    @aws_retry
+    def _touch_s3_object(self, path):
+        print(path)
+        url = urlparse(path)
+        key = url.path.lstrip('/')
+        bucket = url.netloc
+        copy_source = {'Bucket': bucket, 'Key': key}
+        touched_metadata = {'touched': str(int(time.time()))}
+        if self.monitor:
+            with self.monitor.measure("metaflow.s3.touch_object"):
+                self.s3.copy_object(Bucket=bucket, Key=key,
+                        CopySource=copy_source,
+                        Metadata=touched_metadata,
+                        MetadataDirective='REPLACE')
+        else:
+            self.s3.copy_object(Bucket=bucket, Key=key,
+                    CopySource=copy_source,
+                    Metadata=touched_metadata,
+                    MetadataDirective='REPLACE')
 
     @classmethod
     def get_latest_tasks(cls,
@@ -216,6 +237,8 @@ class S3DataStore(MetaflowDataStore):
             transformable_object.transform(lambda _: buf)
             buf.seek(0)
             self._put_s3_object(path, buf=buf)
+        else:
+            self._touch_s3_object(path)
         return path
 
     def load_data(self, sha):
